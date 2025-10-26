@@ -1,0 +1,8 @@
+services:
+  api:
+    build: .
+    image: ${IMAGE_NAME:-lab1}:latest
+    container_name: lab1
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
