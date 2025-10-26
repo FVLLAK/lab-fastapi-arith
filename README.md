@@ -27,3 +27,4 @@ git branch -M main
 git remote add origin https://github.com/FVLLAK/lab-fastapi-arith.git
 git push -u origin main
 # redeploy check 26 أكتوبر, 2025 +01 21:37:58
+# redeploy check 26 أكتوبر, 2025 +01 21:41:24
