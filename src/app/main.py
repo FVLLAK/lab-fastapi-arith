@@ -2,70 +2,96 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Dict
+import time
+from typing import Dict, Tuple
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, field_validator
+from flask import Flask, jsonify, request, Response
+from prometheus_client import Counter, Histogram, CONTENT_TYPE_LATEST, generate_latest
 
-# Logs lisibles
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+app = Flask(__name__)
 
-app = FastAPI(title="Arithmetic API", version="1.0.0")
+# ---- Prometheus metrics ----
+REQUEST_COUNT = Counter("api_requests_total", "Total requests", ["method", "endpoint", "http_status"])
+REQUEST_LATENCY = Histogram("api_request_duration_seconds", "Request latency (s)", ["endpoint"])
 
+@app.before_request
+def _before() -> None:
+    request._start_time = time.perf_counter()
 
-class Operands(BaseModel):
-    a: float
-    b: float
+@app.after_request
+def _after(response: Response) -> Response:
+    try:
+        duration = time.perf_counter() - getattr(request, "_start_time", time.perf_counter())
+        endpoint = request.path
+        REQUEST_LATENCY.labels(endpoint).observe(duration)
+        REQUEST_COUNT.labels(request.method, endpoint, str(response.status_code)).inc()
+    except Exception:
+        pass
+    return response
 
-    @field_validator("a", "b")
-    @classmethod
-    def must_be_finite(cls, v: float) -> float:
-        if not math.isfinite(v):
-            raise ValueError("La valeur doit être un nombre fini (ni NaN ni infini).")
-        return v
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+# ---------------------------
 
+def _bad_request(msg: str):
+    return jsonify({"detail": msg}), 400
+
+def _parse_operands() -> Tuple[float, float] | Tuple[Response, int]:
+    data = request.get_json(silent=True) or {}
+    if not {"a", "b"} <= set(data):
+        return _bad_request("Payload attendu: {'a': float, 'b': float}")
+    try:
+        a = float(data["a"])
+        b = float(data["b"])
+    except (TypeError, ValueError):
+        return _bad_request("Les champs 'a' et 'b' doivent être numériques.")
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return _bad_request("Les valeurs doivent être finies (ni NaN ni infini).")
+    return a, b
 
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
 
-
-def _result_payload(value: float) -> Dict[str, float]:
-    return {"result": value}
-
-
 @app.post("/add")
-def add(payload: Operands) -> Dict[str, float]:
-    logging.info("Addition: %s + %s", payload.a, payload.b)
-    return _result_payload(payload.a + payload.b)
-
+def add():
+    parsed = _parse_operands()
+    if isinstance(parsed, tuple) and len(parsed) == 2 and isinstance(parsed[0], float):
+        a, b = parsed
+        logging.info("Addition: %s + %s", a, b)
+        return jsonify({"result": a + b})
+    return parsed
 
 @app.post("/sub")
-def sub(payload: Operands) -> Dict[str, float]:
-    logging.info("Soustraction: %s - %s", payload.a, payload.b)
-    return _result_payload(payload.a - payload.b)
-
+def sub():
+    parsed = _parse_operands()
+    if isinstance(parsed, tuple) and len(parsed) == 2 and isinstance(parsed[0], float):
+        a, b = parsed
+        logging.info("Soustraction: %s - %s", a, b)
+        return jsonify({"result": a - b})
+    return parsed
 
 @app.post("/mul")
-def mul(payload: Operands) -> Dict[str, float]:
-    logging.info("Multiplication: %s * %s", payload.a, payload.b)
-    return _result_payload(payload.a * payload.b)
-
+def mul():
+    parsed = _parse_operands()
+    if isinstance(parsed, tuple) and len(parsed) == 2 and isinstance(parsed[0], float):
+        a, b = parsed
+        logging.info("Multiplication: %s * %s", a, b)
+        return jsonify({"result": a * b})
+    return parsed
 
 @app.post("/div")
-def div(payload: Operands) -> Dict[str, float]:
-    logging.info("Division: %s / %s", payload.a, payload.b)
-    if payload.b == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Division par zéro interdite (paramètre 'b' ne doit pas être égal à 0).",
-        )
-    return _result_payload(payload.a / payload.b)
-
+def div():
+    parsed = _parse_operands()
+    if isinstance(parsed, tuple) and len(parsed) == 2 and isinstance(parsed[0], float):
+        a, b = parsed
+        logging.info("Division: %s / %s", a, b)
+        if b == 0:
+            return _bad_request("Division par zéro interdite (paramètre 'b' ne doit pas être égal à 0).")
+        return jsonify({"result": a / b})
+    return parsed
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("src.app.main:app", host="0.0.0.0", port=8000, reload=False)
+    app.run(host="0.0.0.0", port=8000)
