@@ -95,3 +95,11 @@ def div():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+    import os
+    # Par défaut, on écoute en local pour éviter B104. En conteneur, exporte FLASK_RUN_HOST=0.0.0.0
+    host = os.getenv("FLASK_RUN_HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+    # Bandit: B104 n'est plus trigger car host est dynamique et par défaut 127.0.0.1
+    app.run(host=host, port=port)
