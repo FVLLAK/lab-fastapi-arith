@@ -52,16 +52,21 @@ pipeline {
     }
 
     // 3) Déployer sans rebuild (compose n'essaie pas de reconstruire)
-    stage('Deploy') {
-      steps {
+	stage('Deploy') {
+    steps {
         sh '''
-          echo "🚀 Deploying with docker compose..."
-          docker compose down || true
-          docker compose up -d --no-build
-          docker ps
+        echo "🚀 Deploying with docker compose..."
+        # Stop and remove all old containers for this project
+        docker compose down --remove-orphans || true
+        # Force remove any existing containers named lab2-app, prometheus, grafana
+        docker rm -f lab2-app prometheus grafana 2>/dev/null || true
+        # Bring up the stack fresh
+        docker compose up -d --build
         '''
-      }
     }
+}
+
+
   }
 
   post {
